@@ -1,58 +1,230 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Online Book Reading System
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A Laravel 12 REST API for managing a personal book reading experience with font-size-aware page tracking and race condition safety.
 
-## About Laravel
+---
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
-
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
-
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
-
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+## Quick Start (Docker)
 
 ```bash
-composer require laravel/boost --dev
+git clone git@github.com:sadafiiman/online_book_reading_system.git
+cd book-reading-system
 
-php artisan boost:install
+docker compose up -d --build
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+That's it. The entrypoint automatically:
+- Generates an `APP_KEY`
+- Runs migrations
+- Seeds 5 books into the database
 
-## Contributing
+**Base URL:** `http://localhost:8080/api`
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+---
 
-## Code of Conduct
+## Architecture & Design Decisions
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+### Layer Structure
 
-## Security Vulnerabilities
+```
+HTTP Layer      →  Controllers, FormRequests, Middleware
+Service Layer   →  BookService (business logic, cache)
+Repository      →  BookRepository (DB + locking)
+Model Layer     →  Book, UserBook (domain logic)
+```
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+### Font-Size-Agnostic Page Tracking
 
-## License
+**The key design decision:** We store `last_read_char_position` (a raw character offset), not a page number. Pages are computed dynamically on each request based on font size.
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+```
+chars_per_page = base_chars_per_page × (base_font_size / current_font_size)
+current_page   = floor(char_position / chars_per_page) + 1
+```
+
+This means changing font size never corrupts the user's reading position — the character offset remains stable, and the page number adjusts automatically.
+
+### Race Condition Safety
+
+`BookRepository::turnPage()` uses **MySQL pessimistic locking** (`SELECT ... FOR UPDATE`) inside a transaction:
+
+```php
+DB::transaction(function () {
+    $userBook = UserBook::where(...)->lockForUpdate()->first();
+    // Only ONE concurrent request can hold this lock.
+    // Others queue and wait. No lost updates.
+    $userBook->advanceToNextPage($fontSize);
+    $userBook->save();
+});
+```
+
+This prevents the "lost update" problem: two simultaneous requests both reading page 5 and both writing page 6.
+
+### Caching
+
+Book metadata (title, author, total_chars) is cached in Redis for 24 hours — books don't change. User state (`is_active`, `last_read_char_position`) is **never** cached because it changes on every turn-page request.
+
+---
+
+## API Reference
+
+All requests require the `X-User-ID` header (integer).
+
+### 1. Add Book to Library
+
+```
+POST /api/library/books
+X-User-ID: 1
+Content-Type: application/json
+
+{ "book_id": 1 }
+```
+
+**Response 201:**
+```json
+{
+  "success": true,
+  "message": "Book added to your library.",
+  "data": {
+    "book_id": 1,
+    "title": "The Art of Clean Code",
+    "author": "Robert C. Martin",
+    "added_at": "2024-01-15T10:00:00.000000Z"
+  }
+}
+```
+
+**Errors:** `404` book not found · `409` already in library · `400` missing header
+
+---
+
+### 2. Open a Book
+
+```
+POST /api/library/books/{bookId}/open
+X-User-ID: 1
+Content-Type: application/json
+
+{ "font_size": 18 }   ← optional, defaults to 16
+```
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "message": "Book opened successfully.",
+  "data": {
+    "book_id": 1,
+    "title": "The Art of Clean Code",
+    "last_page": 3,
+    "total_pages": 60,
+    "font_size": 18
+  }
+}
+```
+
+**Errors:** `404` book not found or not in library
+
+---
+
+### 3. Turn Page
+
+```
+POST /api/library/books/{bookId}/turn-page
+X-User-ID: 1
+Content-Type: application/json
+
+{ "font_size": 18 }   ← optional, defaults to 16
+```
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "message": "Page turned successfully.",
+  "data": {
+    "book_id": 1,
+    "current_page": 4,
+    "total_pages": 60,
+    "font_size": 18,
+    "is_last_page": false
+  }
+}
+```
+
+**Errors:** `404` book not in library · `422` book not active (open it first) · `422` already on last page
+
+---
+
+## Seeded Books (IDs 1–5)
+
+| ID | Title | Author | ~Pages (font 16) |
+|----|-------|--------|-------------------|
+| 1 | The Art of Clean Code | Robert C. Martin | 60 |
+| 2 | Design Patterns in PHP | Gang of Four | 48 |
+| 3 | Laravel: Up and Running | Matt Stauffer | 40 |
+| 4 | Domain-Driven Design | Eric Evans | 73 |
+| 5 | The Pragmatic Programmer | Andrew Hunt | 55 |
+
+---
+
+## Running Tests
+
+```bash
+# Inside the container
+docker compose exec app php artisan test
+
+# Or with coverage
+docker compose exec app php artisan test --coverage
+```
+
+---
+
+## Project Structure
+
+```
+app/
+├── Http/
+│   ├── Controllers/
+│   │   └── BookController.php        # Thin — delegates to service
+│   ├── Middleware/
+│   │   └── ResolveUserId.php         # Extracts X-User-ID header
+│   └── Requests/
+│       ├── AddBookRequest.php
+│       ├── OpenBookRequest.php
+│       └── TurnPageRequest.php
+├── Models/
+│   ├── Book.php                      # totalPagesForFontSize()
+│   └── UserBook.php                  # currentPage(), advanceToNextPage()
+├── Repositories/
+│   ├── Interfaces/
+│   │   └── BookRepositoryInterface.php
+│   └── BookRepository.php            # DB locking for race conditions
+├── Services/
+│   └── BookService.php               # Business logic + Redis cache
+├── Exceptions/
+│   └── BookExceptions.php            # Domain exceptions
+└── Providers/
+    └── AppServiceProvider.php        # Interface → Implementation binding
+
+database/
+├── migrations/
+│   ├── ..._create_books_table.php
+│   └── ..._create_user_books_table.php
+└── seeders/
+    ├── BookSeeder.php
+    └── DatabaseSeeder.php
+
+tests/
+├── Feature/
+│   └── BookApiTest.php               # Full HTTP integration tests
+└── Unit/
+    ├── PageCalculationTest.php        # Font-size math tests
+    └── BookRepositoryTest.php         # Repository behavior tests
+
+docker/
+├── nginx/default.conf
+└── php/
+    ├── Dockerfile
+    └── entrypoint.sh
+```
