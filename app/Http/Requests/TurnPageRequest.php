@@ -2,24 +2,12 @@
 
 namespace App\Http\Requests;
 
-use Illuminate\Foundation\Http\FormRequest;
-
-class TurnPageRequest extends FormRequest
+class TurnPageRequest extends ApiRequest
 {
-    public function authorize(): bool
-    {
-        return true;
-    }
-
     public function rules(): array
     {
         return [
-            'font_size' => ['sometimes', 'integer', 'min:8', 'max:72'],
+            'font_size' => ['sometimes', 'integer', 'between:8,40'],
         ];
-    }
-
-    public function getUserId(): int
-    {
-        return (int) $this->input('_resolved_user_id');
     }
 }

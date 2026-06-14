@@ -37,7 +37,7 @@ class BookService
             'book_id'  => $book->id,
             'title'    => $book->title,
             'author'   => $book->author,
-            'added_at' => $userBook->created_at->toISOString(),
+            'added_at' => $userBook->created_at,
         ];
     }
 
@@ -49,14 +49,11 @@ class BookService
             throw new BookNotFoundException("Book with ID {$bookId} does not exist.");
         }
 
-        $userBook = $this->bookRepository->findUserBook($userId, $bookId);
-
-        if (! $userBook) {
+        if (! $this->bookRepository->findUserBook($userId, $bookId)) {
             throw new BookNotFoundException('Book not found in your library. Add it first.');
         }
 
-        $this->bookRepository->deactivateAllUserBooks($userId);
-        $userBook = $this->bookRepository->activateUserBook($userBook);
+        $userBook = $this->bookRepository->switchActiveBook($userId, $bookId);
 
         return [
             'book_id'     => $book->id,
