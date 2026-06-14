@@ -11,6 +11,11 @@ class UserSeeder extends Seeder
     use WithFaker;
     public function run(): void
     {
-        User::factory()->count(5)->create(['email' => $this->faker()->email]);
+        User::factory()
+            ->count(5)
+            ->sequence(fn () => [
+                'email' => fake()->unique()->safeEmail(),
+            ])
+            ->create();
     }
 }
