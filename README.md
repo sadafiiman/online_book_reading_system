@@ -27,10 +27,39 @@ That's it. The entrypoint automatically:
 ### Layer Structure
 
 ```
-HTTP Layer      →  Controllers, FormRequests, Middleware
+HTTP Layer      →  Controllers, FormRequests, Resources, Middleware
 Service Layer   →  BookService (business logic, cache)
 Repository      →  BookRepository / CachedBookRepository (DB + locking + cache-aside)
 Model Layer     →  Book, UserBook (domain logic)
+```
+
+### DTOs & Resources
+
+All data flowing between layers is typed via **Data Transfer Objects (DTOs)**. HTTP responses are shaped by dedicated **Resource** classes, keeping controllers thin and serialization logic explicit.
+
+| DTO | Purpose |
+|-----|---------|
+| `AddBookData` | Carries validated input for adding a book to a library |
+| `BookProgressData` | Represents current reading position and page metadata |
+| `LibraryEntryData` | Encapsulates a user's library entry (book + metadata) |
+| `OpenBookData` | Input for opening a book with optional font size |
+| `TurnPageData` | Input for turning a page with optional font size |
+| `TurnPageResultData` | Result of a page-turn operation |
+
+| Resource | Shapes |
+|----------|--------|
+| `BookProgressResource` | Reading progress responses |
+| `LibraryEntryResource` | Library entry responses |
+| `TurnPageResultResource` | Page-turn responses |
+
+All endpoints return a consistent envelope via `ApiResponse`:
+
+```json
+{
+  "success": true,
+  "message": "...",
+  "data": { ... }
+}
 ```
 
 ### Font-Size-Agnostic Page Tracking
@@ -66,7 +95,7 @@ This prevents the "lost update" problem: two simultaneous requests both reading 
 
 - **Book metadata** (title, author, total_chars) is cached for 24 hours — books don't change.
 - **User reading state** (`is_active`, `last_read_char_position`) is cached with a short 5-minute TTL for fast reads, but **writes always go through the database first** (with row locking via `turnPage`/`switchActiveBook`), and the cache is refreshed afterward from the committed result — the cache is never the source of truth for correctness-critical paths.
-- Cached values are stored as plain attribute arrays (`toArray()`) and rehydrated via `Model::hydrate()` on read, to avoid serialization issues with Eloquent model instances across cache drivers.
+- Cached values are stored as plain attribute arrays (`toArray()`) and rehydrated via `Model::hydrate()` on read, to avoid `__PHP_Incomplete_Class` serialization issues with Eloquent model instances across cache drivers.
 
 ---
 
@@ -198,16 +227,30 @@ docker compose exec app php artisan test --filter adding_a_book_twice_returns_40
 
 ```
 app/
+├── DTOs/
+│   ├── AddBookData.php
+│   ├── BookProgressData.php
+│   ├── LibraryEntryData.php
+│   ├── OpenBookData.php
+│   ├── TurnPageData.php
+│   └── TurnPageResultData.php
 ├── Http/
 │   ├── Controllers/
 │   │   └── BookController.php            # Thin — delegates to service
 │   ├── Middleware/
 │   │   └── ResolveUserIdMiddleware.php   # Extracts X-User-Id header
-│   └── Requests/
-│       ├── ApiRequest.php                # Shared base request
-│       ├── AddBookRequest.php
-│       ├── OpenBookRequest.php
-│       └── TurnPageRequest.php
+│   ├── Requests/
+│   │   ├── ApiRequest.php                # Shared base request
+│   │   ├── AddBookRequest.php
+│   │   ├── OpenBookRequest.php
+│   │   └── TurnPageRequest.php
+│   └── Resources/
+│       ├── BookProgressResource.php
+│       ├── LibraryEntryResource.php
+│       └── TurnPageResultResource.php
+├── Http/
+│   └── Responses/
+│       └── ApiResponse.php               # Consistent JSON envelope
 ├── Models/
 │   ├── Book.php                          # totalPagesForFontSize()
 │   └── UserBook.php                      # currentPage(), advanceToNextPage()
