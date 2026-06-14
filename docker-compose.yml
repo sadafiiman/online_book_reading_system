@@ -20,6 +20,14 @@ services:
         environment:
             - APP_ENV=local
             - APP_KEY=${APP_KEY:-base64:defaultkeyfordevonlypleasechange=}
+            - DB_CONNECTION=mysql
+            - DB_HOST=db
+            - DB_PORT=3306
+            - DB_DATABASE=${DB_DATABASE:-book_reading}
+            - DB_USERNAME=${DB_USERNAME:-book_user}
+            - DB_PASSWORD=${DB_PASSWORD:-secret}
+            - REDIS_HOST=redis
+            - REDIS_PORT=6379
 
     nginx:
         image: nginx:alpine
@@ -40,10 +48,10 @@ services:
         container_name: book_db
         restart: unless-stopped
         environment:
-            MYSQL_DATABASE: book_reading
-            MYSQL_ROOT_PASSWORD: secret
-            MYSQL_USER: book_user
-            MYSQL_PASSWORD: secret
+            MYSQL_DATABASE: ${DB_DATABASE:-book_reading}
+            MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-secret}
+            MYSQL_USER: ${DB_USERNAME:-book_user}
+            MYSQL_PASSWORD: ${DB_PASSWORD:-secret}
         volumes:
             - db_data:/var/lib/mysql
         ports:
@@ -51,7 +59,7 @@ services:
         networks:
             - book_network
         healthcheck:
-            test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-psecret"]
+            test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD:-secret}"]
             interval: 10s
             timeout: 5s
             retries: 5
@@ -74,24 +82,26 @@ services:
         image: mysql:8.0
         container_name: book_db_test
         environment:
-            MYSQL_DATABASE: book_reading_test
-            MYSQL_ROOT_PASSWORD: secret
-            MYSQL_USER: book_user
-            MYSQL_PASSWORD: secret
+            MYSQL_DATABASE: ${DB_TEST_DATABASE:-book_reading_test}
+            MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-secret}
+            MYSQL_USER: ${DB_USERNAME:-book_user}
+            MYSQL_PASSWORD: ${DB_PASSWORD:-secret}
         tmpfs:
             - /var/lib/mysql
         networks:
             - book_network
         healthcheck:
-            test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-psecret" ]
+            test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD:-secret}"]
             interval: 5s
             timeout: 5s
             retries: 10
+
     redis_test:
         image: redis:7-alpine
         container_name: book_redis_test
         networks:
             - book_network
+
 networks:
     book_network:
         driver: bridge
