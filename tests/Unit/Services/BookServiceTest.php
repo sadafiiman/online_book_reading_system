@@ -2,6 +2,9 @@
 
 namespace Tests\Unit\Services;
 
+use App\DTOs\AddBookData;
+use App\DTOs\OpenBookData;
+use App\DTOs\TurnPageData;
 use App\Exceptions\BookExceptions\BookAlreadyInLibraryException;
 use App\Exceptions\BookExceptions\BookNotActiveException;
 use App\Exceptions\BookExceptions\BookNotFoundException;
@@ -44,11 +47,12 @@ class BookServiceTest extends TestCase
         $this->repository->shouldReceive('findUserBook')->with(10, 1)->once()->andReturnNull();
         $this->repository->shouldReceive('addBookToLibrary')->with(10, 1)->once()->andReturn($userBook);
 
-        $result = $this->service->addToLibrary(10, 1);
+        $result = $this->service->addToLibrary(new AddBookData(userId: 10, bookId: 1));
 
-        $this->assertSame(1, $result['book_id']);
-        $this->assertSame('Clean Code', $result['title']);
-        $this->assertArrayHasKey('added_at', $result);
+        $this->assertSame(1, $result->bookId);
+        $this->assertSame('Clean Code', $result->title);
+        $this->assertSame('Bob', $result->author);
+        $this->assertNotNull($result->addedAt);
     }
 
     #[Test]
@@ -58,7 +62,7 @@ class BookServiceTest extends TestCase
 
         $this->expectException(BookNotFoundException::class);
 
-        $this->service->addToLibrary(10, 999);
+        $this->service->addToLibrary(new AddBookData(userId: 10, bookId: 999));
     }
 
     #[Test]
@@ -72,7 +76,7 @@ class BookServiceTest extends TestCase
 
         $this->expectException(BookAlreadyInLibraryException::class);
 
-        $this->service->addToLibrary(10, 1);
+        $this->service->addToLibrary(new AddBookData(userId: 10, bookId: 1));
     }
 
     #[Test]
@@ -91,12 +95,12 @@ class BookServiceTest extends TestCase
         $this->repository->shouldReceive('findUserBook')->with(10, 1)->once()->andReturn($existing);
         $this->repository->shouldReceive('switchActiveBook')->with(10, 1)->once()->andReturn($activated);
 
-        $result = $this->service->openBook(10, 1, 16);
+        $result = $this->service->openBook(new OpenBookData(userId: 10, bookId: 1, fontSize: 16));
 
-        $this->assertSame(1, $result['book_id']);
-        $this->assertSame(3, $result['last_page']);    // floor(4000/2000)+1
-        $this->assertSame(10, $result['total_pages']); // 20000/2000
-        $this->assertSame(16, $result['font_size']);
+        $this->assertSame(1, $result->bookId);
+        $this->assertSame(3, $result->lastPage);    // floor(4000/2000)+1
+        $this->assertSame(10, $result->totalPages); // 20000/2000
+        $this->assertSame(16, $result->fontSize);
     }
 
     #[Test]
@@ -106,7 +110,7 @@ class BookServiceTest extends TestCase
 
         $this->expectException(BookNotFoundException::class);
 
-        $this->service->openBook(10, 999, 16);
+        $this->service->openBook(new OpenBookData(userId: 10, bookId: 999, fontSize: 16));
     }
 
     #[Test]
@@ -119,7 +123,7 @@ class BookServiceTest extends TestCase
 
         $this->expectException(BookNotFoundException::class);
 
-        $this->service->openBook(10, 1, 16);
+        $this->service->openBook(new OpenBookData(userId: 10, bookId: 1, fontSize: 16));
     }
 
     #[Test]
@@ -134,12 +138,12 @@ class BookServiceTest extends TestCase
 
         $this->repository->shouldReceive('turnPage')->with(10, 1, 16)->once()->andReturn($userBook);
 
-        $result = $this->service->turnPage(10, 1, 16);
+        $result = $this->service->turnPage(new TurnPageData(userId: 10, bookId: 1, fontSize: 16));
 
-        $this->assertSame(1, $result['book_id']);
-        $this->assertSame(2, $result['current_page']);
-        $this->assertSame(10, $result['total_pages']);
-        $this->assertFalse($result['is_last_page']);
+        $this->assertSame(1, $result->bookId);
+        $this->assertSame(2, $result->currentPage);
+        $this->assertSame(10, $result->totalPages);
+        $this->assertFalse($result->isLastPage);
     }
 
     #[Test]
@@ -152,7 +156,7 @@ class BookServiceTest extends TestCase
 
         $this->expectException(LastPageReachedException::class);
 
-        $this->service->turnPage(10, 1, 16);
+        $this->service->turnPage(new TurnPageData(userId: 10, bookId: 1, fontSize: 16));
     }
 
     #[Test]
@@ -165,6 +169,6 @@ class BookServiceTest extends TestCase
 
         $this->expectException(BookNotActiveException::class);
 
-        $this->service->turnPage(10, 1, 16);
+        $this->service->turnPage(new TurnPageData(userId: 10, bookId: 1, fontSize: 16));
     }
 }

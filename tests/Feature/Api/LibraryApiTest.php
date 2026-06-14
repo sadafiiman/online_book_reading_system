@@ -33,13 +33,13 @@ class LibraryApiTest extends TestCase
     }
 
     #[Test]
-    public function adding_a_nonexistent_book_returns_404(): void
+    public function adding_a_nonexistent_book_returns_422(): void
     {
         $user = User::factory()->create();
 
         $this->withHeaders($this->asUser($user))
             ->postJson('/api/library/books', ['book_id' => 999999])
-            ->assertStatus(404)
+            ->assertStatus(422)
             ->assertJson(['success' => false]);
     }
 
