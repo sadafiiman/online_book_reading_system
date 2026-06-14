@@ -2,6 +2,12 @@
 
 namespace App\Services;
 
+use App\DTOs\AddBookData;
+use App\DTOs\BookProgressData;
+use App\DTOs\LibraryEntryData;
+use App\DTOs\OpenBookData;
+use App\DTOs\TurnPageData;
+use App\DTOs\TurnPageResultData;
 use App\Exceptions\BookExceptions\BookAlreadyInLibraryException;
 use App\Exceptions\BookExceptions\BookNotFoundException;
 use App\Repositories\Interfaces\BookRepositoryInterface;
@@ -17,66 +23,66 @@ class BookService
         private readonly BookRepositoryInterface $bookRepository,
     ) {}
 
-    public function addToLibrary(int $userId, int $bookId): array
+    public function addToLibrary(AddBookData $data): LibraryEntryData
     {
-        $book = $this->bookRepository->findById($bookId);
+        $book = $this->bookRepository->findById($data->bookId);
 
         if (! $book) {
-            throw new BookNotFoundException("Book with ID {$bookId} does not exist.");
+            throw new BookNotFoundException("Book with ID {$data->bookId} does not exist.");
         }
 
-        $existing = $this->bookRepository->findUserBook($userId, $bookId);
+        $existing = $this->bookRepository->findUserBook($data->userId, $data->bookId);
 
         if ($existing) {
             throw new BookAlreadyInLibraryException('This book is already in your library.');
         }
 
-        $userBook = $this->bookRepository->addBookToLibrary($userId, $bookId);
+        $userBook = $this->bookRepository->addBookToLibrary($data->userId, $data->bookId);
 
-        return [
-            'book_id'  => $book->id,
-            'title'    => $book->title,
-            'author'   => $book->author,
-            'added_at' => $userBook->created_at,
-        ];
+        return new LibraryEntryData(
+            bookId: $book->id,
+            title: $book->title,
+            author: $book->author,
+            addedAt: $userBook->created_at ?? now(),
+        );
     }
 
-    public function openBook(int $userId, int $bookId, int $fontSize): array
+    public function openBook(OpenBookData $data): BookProgressData
     {
-        $book = $this->bookRepository->findById($bookId);
+        $book = $this->bookRepository->findById($data->bookId);
 
         if (! $book) {
-            throw new BookNotFoundException("Book with ID {$bookId} does not exist.");
+            throw new BookNotFoundException("Book with ID {$data->bookId} does not exist.");
         }
 
-        if (! $this->bookRepository->findUserBook($userId, $bookId)) {
+        if (! $this->bookRepository->findUserBook($data->userId, $data->bookId)) {
             throw new BookNotFoundException('Book not found in your library. Add it first.');
         }
 
-        $userBook = $this->bookRepository->switchActiveBook($userId, $bookId);
+        $userBook = $this->bookRepository->switchActiveBook($data->userId, $data->bookId);
 
-        return [
-            'book_id'     => $book->id,
-            'title'       => $book->title,
-            'last_page'   => $userBook->currentPage($fontSize),
-            'total_pages' => $book->totalPagesForFontSize($fontSize),
-            'font_size'   => $fontSize,
-        ];
+        return new BookProgressData(
+            bookId: $book->id,
+            title: $book->title,
+            lastPage: $userBook->currentPage($data->fontSize),
+            totalPages: $book->totalPagesForFontSize($data->fontSize),
+            fontSize: $data->fontSize,
+        );
     }
 
-    public function turnPage(int $userId, int $bookId, int $fontSize): array
+    public function turnPage(TurnPageData $data): TurnPageResultData
     {
-        $userBook = $this->bookRepository->turnPage($userId, $bookId, $fontSize);
+        $userBook = $this->bookRepository->turnPage($data->userId, $data->bookId, $data->fontSize);
 
-        $currentPage = $userBook->currentPage($fontSize);
-        $totalPages  = $userBook->book->totalPagesForFontSize($fontSize);
+        $currentPage = $userBook->currentPage($data->fontSize);
+        $totalPages  = $userBook->book->totalPagesForFontSize($data->fontSize);
 
-        return [
-            'book_id'      => $userBook->book_id,
-            'current_page' => $currentPage,
-            'total_pages'  => $totalPages,
-            'font_size'    => $fontSize,
-            'is_last_page' => $currentPage >= $totalPages,
-        ];
+        return new TurnPageResultData(
+            bookId: $userBook->book_id,
+            currentPage: $currentPage,
+            totalPages: $totalPages,
+            fontSize: $data->fontSize,
+            isLastPage: $currentPage >= $totalPages,
+        );
     }
 }
