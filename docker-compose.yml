@@ -70,6 +70,28 @@ services:
             timeout: 5s
             retries: 5
 
+    db_test:
+        image: mysql:8.0
+        container_name: book_db_test
+        environment:
+            MYSQL_DATABASE: book_reading_test
+            MYSQL_ROOT_PASSWORD: secret
+            MYSQL_USER: book_user
+            MYSQL_PASSWORD: secret
+        tmpfs:
+            - /var/lib/mysql
+        networks:
+            - book_network
+        healthcheck:
+            test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-psecret" ]
+            interval: 5s
+            timeout: 5s
+            retries: 10
+    redis_test:
+        image: redis:7-alpine
+        container_name: book_redis_test
+        networks:
+            - book_network
 networks:
     book_network:
         driver: bridge
