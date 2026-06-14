@@ -221,6 +221,28 @@ docker compose exec app php artisan test --filter adding_a_book_twice_returns_40
 
 > **Note:** Avoid running `php artisan config:cache` / `route:cache` in local development — cached config silently overrides `phpunit.xml` environment variables and can cause tests to connect to the wrong database/cache.
 
+
+## Postman Collection
+
+A ready-to-use Postman collection is included in the project root: **`API.postman_collection.json`**.
+
+### Import
+
+1. Postman → **Import** → select `API.postman_collection.json` from the project root.
+2. Set the collection variable `base_url` to `http://localhost:8080/api` (the default for the Docker setup).
+3. Set the collection variable `user_id` — this is sent as the `X-User-Id` header on every request, since the system doesn't implement authentication.
+
+### Suggested flow
+
+The requests are grouped to exercise the full reading flow in order:
+
+1. **Add Book to Library** — `POST /library/books` with a `book_id` from 1–5 (the seeded books).
+2. **Open Book** — `POST /library/books/{bookId}/open`, marks it active and returns the last read page.
+3. **Turn Page** — `POST /library/books/{bookId}/turn-page`, run repeatedly to advance through the book and confirm `current_page` increments correctly.
+
+Try opening a second book after step 2 — it deactivates the first, since only one book can be active per user at a time. Then try `turn-page` on the now-inactive book to see the `422` response.
+
+
 ---
 
 ## Project Structure
