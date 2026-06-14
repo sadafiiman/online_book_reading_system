@@ -12,19 +12,19 @@ use Illuminate\Support\Facades\DB;
 
 class BookRepository implements BookRepositoryInterface
 {
-    public function findById(int $id): ?Book
+    public function findById(int $bookId): ?Book
     {
-        return Book::find($id);
+        return Book::find($bookId);
     }
 
-    public function findLibrary(int $userId, int $bookId): ?UserBook
+    public function findUserBook(int $userId, int $bookId): ?UserBook
     {
         return UserBook::where('user_id', $userId)
             ->where('book_id', $bookId)
             ->first();
     }
 
-    public function findActiveLibrary(int $userId): ?UserBook
+    public function findActiveUserBook(int $userId): ?UserBook
     {
         return UserBook::where('user_id', $userId)
             ->where('is_active', true)
@@ -44,82 +44,72 @@ class BookRepository implements BookRepositoryInterface
         );
     }
 
-    public function deactivateAllLibraries(int $userId): void
-    {
-        UserBook::where('user_id', $userId)
-            ->where('is_active', true)
-            ->update(['is_active' => false]);
-    }
-
-    public function activateLibrary(UserBook $Library): UserBook
-    {
-        $Library->update(['is_active' => true]);
-
-        return $Library->fresh(['book']);
-    }
-
     /**
-     * Turn page with pessimistic locking to prevent race conditions.
-     *
-     * Uses DB::transaction + lockForUpdate() so that concurrent requests
-     * for the same user/book are serialized at the database level.
-     * Only one request advances the page; others wait for the lock.
-     *
-     * This is critical: without locking, two simultaneous "turn page"
-     * requests could both read page 5, both write page 6 — losing a turn.
+     * Deactivate any other active book and activate the target one,
+     * inside a single transaction with row locks. This guarantees a
+     * user always ends up with exactly one active book even under
+     * concurrent "open book" calls (same book or different books).
      */
-    public function turnPage(int $userId, int $bookId, int $fontSize): UserBook
+    public function switchActiveBook(int $userId, int $bookId): UserBook
     {
-        return DB::transaction(function () use ($userId, $bookId, $fontSize) {
-            // lockForUpdate() issues SELECT ... FOR UPDATE
-            // Blocks any other transaction from reading/writing this row
-            // until this transaction commits or rolls back.
-            $Library = UserBook::where('user_id', $userId)
+        return DB::transaction(function () use ($userId, $bookId) {
+            $target = UserBook::where('user_id', $userId)
                 ->where('book_id', $bookId)
                 ->lockForUpdate()
                 ->first();
 
-            if (! $Library) {
+            if (! $target) {
+                throw new BookNotFoundException('Book not found in your library. Add it first.');
+            }
+
+            UserBook::where('user_id', $userId)
+                ->where('is_active', true)
+                ->where('id', '!=', $target->id)
+                ->lockForUpdate()
+                ->update(['is_active' => false]);
+
+            if (! $target->is_active) {
+                $target->update(['is_active' => true]);
+            }
+
+            return $target->fresh(['book']);
+        });
+    }
+
+    /**
+     * Pessimistic locking prevents two concurrent "turn page" requests
+     * for the same user/book from both reading position N and both
+     * writing N+1 — the second waits for the first transaction to commit.
+     */
+    public function turnPage(int $userId, int $bookId, int $fontSize): UserBook
+    {
+        return DB::transaction(function () use ($userId, $bookId, $fontSize) {
+            $userBook = UserBook::where('user_id', $userId)
+                ->where('book_id', $bookId)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $userBook) {
                 throw new BookNotFoundException('Book not found in user library.');
             }
 
-            if (! $Library->is_active) {
+            if (! $userBook->is_active) {
                 throw new BookNotActiveException('Book is not currently active. Open the book first.');
             }
 
-            $Library->load('book');
+            $userBook->load('book');
 
-            $totalPages  = $Library->book->totalPagesForFontSize($fontSize);
-            $currentPage = $Library->currentPage($fontSize);
+            $totalPages  = $userBook->book->totalPagesForFontSize($fontSize);
+            $currentPage = $userBook->currentPage($fontSize);
 
             if ($currentPage >= $totalPages) {
                 throw new LastPageReachedException('You have reached the last page of this book.');
             }
 
-            $Library->advanceToNextPage($fontSize);
-            $Library->save();
+            $userBook->advanceToNextPage($fontSize);
+            $userBook->save();
 
-            return $Library;
+            return $userBook;
         });
-    }
-
-    public function findUserBook(int $userId, int $bookId): ?UserBook
-    {
-        // TODO: Implement findUserBook() method.
-    }
-
-    public function findActiveUserBook(int $userId): ?UserBook
-    {
-        // TODO: Implement findActiveUserBook() method.
-    }
-
-    public function deactivateAllUserBooks(int $userId): void
-    {
-        // TODO: Implement deactivateAllUserBooks() method.
-    }
-
-    public function activateUserBook(UserBook $userBook): UserBook
-    {
-        // TODO: Implement activateUserBook() method.
     }
 }
