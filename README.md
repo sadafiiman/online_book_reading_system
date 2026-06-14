@@ -8,13 +8,13 @@ A Laravel 12 REST API for managing a personal book reading experience with font-
 
 ```bash
 git clone git@github.com:sadafiiman/online_book_reading_system.git
-cd book-reading-system
+cd online_book_reading_system
 
 docker compose up -d --build
 ```
 
 That's it. The entrypoint automatically:
-- Generates an `APP_KEY`
+- Generates an `APP_KEY` (if not already set)
 - Runs migrations
 - Seeds 5 books into the database
 
@@ -29,7 +29,7 @@ That's it. The entrypoint automatically:
 ```
 HTTP Layer      →  Controllers, FormRequests, Middleware
 Service Layer   →  BookService (business logic, cache)
-Repository      →  BookRepository (DB + locking)
+Repository      →  BookRepository / CachedBookRepository (DB + locking + cache-aside)
 Model Layer     →  Book, UserBook (domain logic)
 ```
 
@@ -62,19 +62,23 @@ This prevents the "lost update" problem: two simultaneous requests both reading 
 
 ### Caching
 
-Book metadata (title, author, total_chars) is cached in Redis for 24 hours — books don't change. User state (`is_active`, `last_read_char_position`) is **never** cached because it changes on every turn-page request.
+`CachedBookRepository` is a cache-aside decorator around `BookRepository`:
+
+- **Book metadata** (title, author, total_chars) is cached for 24 hours — books don't change.
+- **User reading state** (`is_active`, `last_read_char_position`) is cached with a short 5-minute TTL for fast reads, but **writes always go through the database first** (with row locking via `turnPage`/`switchActiveBook`), and the cache is refreshed afterward from the committed result — the cache is never the source of truth for correctness-critical paths.
+- Cached values are stored as plain attribute arrays (`toArray()`) and rehydrated via `Model::hydrate()` on read, to avoid serialization issues with Eloquent model instances across cache drivers.
 
 ---
 
 ## API Reference
 
-All requests require the `X-User-ID` header (integer).
+All requests require the `X-User-Id` header (integer).
 
 ### 1. Add Book to Library
 
 ```
 POST /api/library/books
-X-User-ID: 1
+X-User-Id: 1
 Content-Type: application/json
 
 { "book_id": 1 }
@@ -94,7 +98,7 @@ Content-Type: application/json
 }
 ```
 
-**Errors:** `404` book not found · `409` already in library · `400` missing header
+**Errors:** `404` book not found · `409` already in library · `422` missing/invalid `book_id`
 
 ---
 
@@ -102,7 +106,7 @@ Content-Type: application/json
 
 ```
 POST /api/library/books/{bookId}/open
-X-User-ID: 1
+X-User-Id: 1
 Content-Type: application/json
 
 { "font_size": 18 }   ← optional, defaults to 16
@@ -123,7 +127,7 @@ Content-Type: application/json
 }
 ```
 
-**Errors:** `404` book not found or not in library
+**Errors:** `404` book not in library · `422` out-of-range font size
 
 ---
 
@@ -131,7 +135,7 @@ Content-Type: application/json
 
 ```
 POST /api/library/books/{bookId}/turn-page
-X-User-ID: 1
+X-User-Id: 1
 Content-Type: application/json
 
 { "font_size": 18 }   ← optional, defaults to 16
@@ -170,13 +174,23 @@ Content-Type: application/json
 
 ## Running Tests
 
+Tests run against a dedicated test database/cache, isolated from the dev environment, configured via `.env.testing` and `phpunit.xml`.
+
 ```bash
-# Inside the container
+# Clear cached config first (important — stale config overrides test env vars)
+docker compose exec app php artisan config:clear
+
+# Run the full suite
 docker compose exec app php artisan test
 
-# Or with coverage
-docker compose exec app php artisan test --coverage
+# Or directly via PHPUnit
+docker compose exec app ./vendor/bin/phpunit
+
+# Run a single test
+docker compose exec app php artisan test --filter adding_a_book_twice_returns_409
 ```
+
+> **Note:** Avoid running `php artisan config:cache` / `route:cache` in local development — cached config silently overrides `phpunit.xml` environment variables and can cause tests to connect to the wrong database/cache.
 
 ---
 
@@ -186,41 +200,55 @@ docker compose exec app php artisan test --coverage
 app/
 ├── Http/
 │   ├── Controllers/
-│   │   └── BookController.php        # Thin — delegates to service
+│   │   └── BookController.php            # Thin — delegates to service
 │   ├── Middleware/
-│   │   └── ResolveUserId.php         # Extracts X-User-ID header
+│   │   └── ResolveUserIdMiddleware.php   # Extracts X-User-Id header
 │   └── Requests/
+│       ├── ApiRequest.php                # Shared base request
 │       ├── AddBookRequest.php
 │       ├── OpenBookRequest.php
 │       └── TurnPageRequest.php
 ├── Models/
-│   ├── Book.php                      # totalPagesForFontSize()
-│   └── UserBook.php                  # currentPage(), advanceToNextPage()
+│   ├── Book.php                          # totalPagesForFontSize()
+│   └── UserBook.php                      # currentPage(), advanceToNextPage()
 ├── Repositories/
 │   ├── Interfaces/
 │   │   └── BookRepositoryInterface.php
-│   └── BookRepository.php            # DB locking for race conditions
+│   ├── BookRepository.php                # DB locking for race conditions
+│   └── CachedBookRepository.php          # Cache-aside decorator
 ├── Services/
-│   └── BookService.php               # Business logic + Redis cache
+│   └── BookService.php                   # Business logic + cache orchestration
 ├── Exceptions/
-│   └── BookExceptions.php            # Domain exceptions
+│   └── BookExceptions/                   # Domain exceptions
 └── Providers/
-    └── AppServiceProvider.php        # Interface → Implementation binding
+    └── AppServiceProvider.php            # Interface → Implementation binding
 
 database/
+├── factories/
+│   ├── BookFactory.php
+│   └── UserBookFactory.php
 ├── migrations/
 │   ├── ..._create_books_table.php
 │   └── ..._create_user_books_table.php
 └── seeders/
     ├── BookSeeder.php
+    ├── UserSeeder.php
     └── DatabaseSeeder.php
 
 tests/
 ├── Feature/
-│   └── BookApiTest.php               # Full HTTP integration tests
+│   ├── Api/
+│   │   └── LibraryApiTest.php            # Full HTTP integration tests
+│   └── Repositories/
+│       └── BookRepositoryTest.php        # Repository + DB behavior tests
 └── Unit/
-    ├── PageCalculationTest.php        # Font-size math tests
-    └── BookRepositoryTest.php         # Repository behavior tests
+    ├── Models/
+    │   ├── BookTest.php                  # Font-size/page math tests
+    │   └── UserBookTest.php
+    ├── Repositories/
+    │   └── CachedBookRepositoryTest.php  # Cache-aside behavior tests
+    └── Services/
+        └── BookServiceTest.php           # Business logic tests (mocked repo)
 
 docker/
 ├── nginx/default.conf
