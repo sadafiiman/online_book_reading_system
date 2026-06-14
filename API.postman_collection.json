@@ -1,0 +1,106 @@
+{
+	"info": {
+		"_postman_id": "50e3768a-b322-472b-8609-f4a31b16d2c1",
+		"name": "Online-Book-reading-system",
+		"schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json",
+		"_exporter_id": "14746769"
+	},
+	"item": [
+		{
+			"name": "Add Book To Library",
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-User-ID",
+						"value": "1",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"book_id\": 2\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": "http://127.0.0.1:8080/api/library/books"
+			},
+			"response": []
+		},
+		{
+			"name": "Open Book",
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-User-ID",
+						"value": "1",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"font_size\": 32\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": "http://127.0.0.1:8080/api/library/books/2/open"
+			},
+			"response": []
+		},
+		{
+			"name": "Turn Book Page",
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-User-ID",
+						"value": "1",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"book_id\": 1\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": "http://127.0.0.1:8080/api/library/books/2/turn-page"
+			},
+			"response": []
+		}
+	]
+}
