@@ -60,6 +60,12 @@ return [
             'report' => false,
         ],
 
+        'book' => [ // We could also add buckets for category type of the book tech, science, ....
+            'driver' => 'local',
+            'root'   => storage_path('app/books'),
+            'throw'  => true,
+        ],
+
     ],
 
     /*

@@ -2,6 +2,7 @@
 
 namespace App\Repositories;
 
+use App\Logging\BookActivityLoggerInterface;
 use App\Models\Book;
 use App\Models\UserBook;
 use App\Repositories\Interfaces\BookRepositoryInterface;
@@ -22,39 +23,70 @@ class CachedBookRepository implements BookRepositoryInterface
 
     public function __construct(
         private readonly BookRepository $repository,
+        private readonly BookActivityLoggerInterface $activityLogger,
     ) {}
 
     public function findById(int $bookId): ?Book
     {
-        $data = Cache::remember(
-            $this->bookKey($bookId),
-            self::BOOK_TTL,
-            fn () => $this->repository->findById($bookId)?->toArray()
-        );
+        $key = $this->bookKey($bookId);
 
-        return $data ? Book::hydrate([$data])->first() : null;
+        if (Cache::has($key)) {
+            $this->activityLogger->cacheHit($key);
+
+            return (new Book)->newInstance(Cache::get($key), exists: true);
+        }
+
+        $this->activityLogger->cacheMiss($key);
+
+        $book = $this->repository->findById($bookId);
+
+        if ($book) {
+            Cache::put($key, $book->toArray(), self::BOOK_TTL);
+        }
+
+        return $book;
     }
 
     public function findUserBook(int $userId, int $bookId): ?UserBook
     {
-        $data = Cache::remember(
-            $this->userBookKey($userId, $bookId),
-            self::USER_BOOK_TTL,
-            fn () => $this->repository->findUserBook($userId, $bookId)?->toArray()
-        );
+        $key = $this->userBookKey($userId, $bookId);
 
-        return $data ? UserBook::hydrate([$data])->first() : null;
+        if (Cache::has($key)) {
+            $this->activityLogger->cacheHit($key);
+
+            return $this->hydrateUserBook(Cache::get($key));
+        }
+
+        $this->activityLogger->cacheMiss($key);
+
+        $userBook = $this->repository->findUserBook($userId, $bookId);
+
+        if ($userBook) {
+            Cache::put($key, $userBook->toArray(), self::USER_BOOK_TTL);
+        }
+
+        return $userBook;
     }
 
     public function findActiveUserBook(int $userId): ?UserBook
     {
-        $data = Cache::remember(
-            $this->activeBookKey($userId),
-            self::USER_BOOK_TTL,
-            fn () => $this->repository->findActiveUserBook($userId)?->toArray()
-        );
+        $key = $this->activeBookKey($userId);
 
-        return $data ? UserBook::hydrate([$data])->first() : null;
+        if (Cache::has($key)) {
+            $this->activityLogger->cacheHit($key);
+
+            return $this->hydrateUserBook(Cache::get($key));
+        }
+
+        $this->activityLogger->cacheMiss($key);
+
+        $userBook = $this->repository->findActiveUserBook($userId);
+
+        if ($userBook) {
+            Cache::put($key, $userBook->toArray(), self::USER_BOOK_TTL);
+        }
+
+        return $userBook;
     }
 
     public function addBookToLibrary(int $userId, int $bookId): UserBook
@@ -79,6 +111,11 @@ class CachedBookRepository implements BookRepositoryInterface
         Cache::put($this->userBookKey($userId, $bookId), $userBook->toArray(), self::USER_BOOK_TTL);
         Cache::put($this->activeBookKey($userId), $userBook->toArray(), self::USER_BOOK_TTL);
 
+        $this->activityLogger->cacheRefresh([
+            $this->userBookKey($userId, $bookId),
+            $this->activeBookKey($userId),
+        ]);
+
         return $userBook;
     }
 
@@ -88,6 +125,36 @@ class CachedBookRepository implements BookRepositoryInterface
 
         Cache::put($this->userBookKey($userId, $bookId), $userBook->toArray(), self::USER_BOOK_TTL);
         Cache::put($this->activeBookKey($userId), $userBook->toArray(), self::USER_BOOK_TTL);
+
+        $this->activityLogger->cacheRefresh([
+            $this->userBookKey($userId, $bookId),
+            $this->activeBookKey($userId),
+        ]);
+
+        return $userBook;
+    }
+
+    /**
+     * Rebuild a UserBook (and its book relation, if present) from a
+     * plain attribute array stored in cache. newFromBuilder() marks the
+     * model as existing and applies casts correctly — unlike
+     * `UserBook::hydrate([$array])`, which would set a nested 'book'
+     * array as a raw attribute, shadowing the book() relation and
+     * breaking any later `$userBook->book->...` call.
+     */
+    private function hydrateUserBook(array $attributes): UserBook
+    {
+        $bookAttributes = $attributes['book'] ?? null;
+        unset($attributes['book']);
+
+        $userBook = new UserBook();
+        $userBook->setRawAttributes($attributes, true);
+
+        if ($bookAttributes) {
+            $book = new Book();
+            $book->setRawAttributes($bookAttributes, true);
+            $userBook->setRelation('book', $book);
+        }
 
         return $userBook;
     }
