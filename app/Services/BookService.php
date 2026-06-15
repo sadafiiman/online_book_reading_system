@@ -11,12 +11,15 @@ use App\DTOs\TurnPageResultData;
 use App\Exceptions\BookExceptions\BookAlreadyInLibraryException;
 use App\Exceptions\BookExceptions\BookNotFoundException;
 use App\Logging\BookActivityLoggerInterface;
+use App\Models\UserBook;
+use App\Repositories\Interfaces\BookContentRepositoryInterface;
 use App\Repositories\Interfaces\BookRepositoryInterface;
 
 class BookService
 {
     public function __construct(
         private readonly BookRepositoryInterface $bookRepository,
+        private readonly BookContentRepositoryInterface $bookContentRepository,
         private readonly BookActivityLoggerInterface $activityLogger,
     ) {}
 
@@ -90,6 +93,7 @@ class BookService
             lastPage: $userBook->currentPage($data->fontSize),
             totalPages: $book->totalPagesForFontSize($data->fontSize),
             fontSize: $data->fontSize,
+            pageText: $this->extractPageText($userBook, $data->fontSize),
         );
 
         $this->activityLogger->bookOpened($data->userId, $book->id, $progress->lastPage, $data->fontSize);
@@ -118,6 +122,20 @@ class BookService
             totalPages: $totalPages,
             fontSize: $data->fontSize,
             isLastPage: $currentPage >= $totalPages,
+            pageText: $this->extractPageText($userBook, $data->fontSize),
         );
+    }
+
+    /**
+     * Extract the text for the page containing the user's current
+     * char position, at the given font size.
+     */
+    private function extractPageText(UserBook $userBook, int $fontSize): string
+    {
+        $content      = $this->bookContentRepository->getContent($userBook->book);
+        $charsPerPage = $userBook->charsPerPage($fontSize);
+        $start        = (int) floor(max(0, $userBook->last_read_char_position) / $charsPerPage) * $charsPerPage;
+
+        return mb_substr($content, $start, $charsPerPage);
     }
 }

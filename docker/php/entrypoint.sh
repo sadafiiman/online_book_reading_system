@@ -10,6 +10,8 @@ if [ -z "$APP_KEY" ] || [ "$APP_KEY" = "base64:defaultkeyfordevonlypleasechange=
     php artisan key:generate --force --no-interaction || true
 fi
 
+mkdir -p storage/app/books storage/logs storage/framework/{cache,sessions,views,testing}
+
 php artisan migrate --force --seed
 
 exec php-fpm

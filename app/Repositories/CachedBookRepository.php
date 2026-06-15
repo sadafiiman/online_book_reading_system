@@ -33,7 +33,10 @@ class CachedBookRepository implements BookRepositoryInterface
         if (Cache::has($key)) {
             $this->activityLogger->cacheHit($key);
 
-            return (new Book)->newInstance(Cache::get($key), exists: true);
+            $book = new Book();
+            $book->setRawAttributes(Cache::get($key), true);
+
+            return $book;
         }
 
         $this->activityLogger->cacheMiss($key);
