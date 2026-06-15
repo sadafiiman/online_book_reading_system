@@ -10,6 +10,7 @@ final readonly class BookProgressData
         public int $lastPage,
         public int $totalPages,
         public int $fontSize,
+        public string $pageText,
     ) {}
 
     public function toArray(): array
@@ -20,6 +21,7 @@ final readonly class BookProgressData
             'last_page'   => $this->lastPage,
             'total_pages' => $this->totalPages,
             'font_size'   => $this->fontSize,
+            'page_text'   => $this->pageText,
         ];
     }
 }

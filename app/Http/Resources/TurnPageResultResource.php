@@ -19,6 +19,7 @@ class TurnPageResultResource extends JsonResource
             'total_pages'  => $this->resource->totalPages,
             'font_size'    => $this->resource->fontSize,
             'is_last_page' => $this->resource->isLastPage,
+            'page_text' => $this->resource->pageText,
         ];
     }
 }

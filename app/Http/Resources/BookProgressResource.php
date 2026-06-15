@@ -19,6 +19,7 @@ class BookProgressResource extends JsonResource
             'last_page'   => $this->resource->lastPage,
             'total_pages' => $this->resource->totalPages,
             'font_size'   => $this->resource->fontSize,
+            'page_text' => $this->resource->pageText,
         ];
     }
 }

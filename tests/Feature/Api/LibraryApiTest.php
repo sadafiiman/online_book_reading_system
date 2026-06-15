@@ -6,6 +6,7 @@ use App\Models\Book;
 use App\Models\User;
 use App\Models\UserBook;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -13,9 +14,31 @@ class LibraryApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Storage::fake('book');
+    }
+
     private function asUser(User $user): array
     {
         return ['X-User-Id' => $user->id];
+    }
+
+    private function createBookWithContent(array $attributes = [], ?string $content = null): Book
+    {
+        $totalChars = $attributes['total_chars'] ?? 20000;
+        $content    = $content ?? str_repeat('x', $totalChars);
+
+        $attributes['total_chars'] = $totalChars;
+        $attributes['file_path']   = 'books/'.uniqid().'.txt';
+
+        $book = Book::factory()->create($attributes);
+
+        Storage::disk('book')->put($book->file_path, $content);
+
+        return $book;
     }
 
     #[Test]
@@ -71,20 +94,23 @@ class LibraryApiTest extends TestCase
     public function user_can_open_a_book_in_their_library(): void
     {
         $user = User::factory()->create();
-        $book = Book::factory()->create(['total_chars' => 20000]);
+        $book = $this->createBookWithContent(['total_chars' => 20000]);
 
         UserBook::factory()->create([
             'user_id' => $user->id, 'book_id' => $book->id,
             'last_read_char_position' => 4000, 'is_active' => false,
         ]);
 
-        $this->withHeaders($this->asUser($user))
+        $response = $this->withHeaders($this->asUser($user))
             ->postJson("/api/library/books/{$book->id}/open", ['font_size' => 16])
             ->assertOk()
             ->assertJson([
                 'success' => true,
                 'data' => ['book_id' => $book->id, 'last_page' => 3, 'total_pages' => 10, 'font_size' => 16],
             ]);
+
+        // Page 3 covers chars [4000, 6000)
+        $this->assertSame(2000, mb_strlen($response->json('data.page_text')));
 
         $this->assertDatabaseHas('user_books', ['user_id' => $user->id, 'book_id' => $book->id, 'is_active' => true]);
     }
@@ -104,8 +130,8 @@ class LibraryApiTest extends TestCase
     public function opening_a_book_deactivates_the_previously_active_book(): void
     {
         $user  = User::factory()->create();
-        $bookA = Book::factory()->create();
-        $bookB = Book::factory()->create();
+        $bookA = $this->createBookWithContent();
+        $bookB = $this->createBookWithContent();
 
         UserBook::factory()->create(['user_id' => $user->id, 'book_id' => $bookA->id, 'is_active' => true]);
         UserBook::factory()->create(['user_id' => $user->id, 'book_id' => $bookB->id, 'is_active' => false]);
@@ -135,20 +161,23 @@ class LibraryApiTest extends TestCase
     public function user_can_turn_the_page_of_the_active_book(): void
     {
         $user = User::factory()->create();
-        $book = Book::factory()->create(['total_chars' => 20000]);
+        $book = $this->createBookWithContent(['total_chars' => 20000]);
 
         UserBook::factory()->create([
             'user_id' => $user->id, 'book_id' => $book->id,
             'is_active' => true, 'last_read_char_position' => 0, 'font_size' => 16,
         ]);
 
-        $this->withHeaders($this->asUser($user))
+        $response = $this->withHeaders($this->asUser($user))
             ->postJson("/api/library/books/{$book->id}/turn-page", ['font_size' => 16])
             ->assertOk()
             ->assertJson([
                 'success' => true,
                 'data' => ['book_id' => $book->id, 'current_page' => 2, 'total_pages' => 10, 'is_last_page' => false],
             ]);
+
+        // Page 2 covers chars [2000, 4000)
+        $this->assertSame(2000, mb_strlen($response->json('data.page_text')));
 
         $this->assertDatabaseHas('user_books', ['user_id' => $user->id, 'book_id' => $book->id, 'last_read_char_position' => 2000]);
     }
@@ -204,7 +233,7 @@ class LibraryApiTest extends TestCase
     public function full_reading_flow_preserves_position_across_font_size_changes(): void
     {
         $user    = User::factory()->create();
-        $book    = Book::factory()->create(['total_chars' => 20000]);
+        $book    = $this->createBookWithContent(['total_chars' => 20000]);
         $headers = $this->asUser($user);
 
         $this->withHeaders($headers)->postJson('/api/library/books', ['book_id' => $book->id])->assertCreated();
