@@ -5,6 +5,10 @@ services:
         build:
             context: .
             dockerfile: docker/php/Dockerfile
+            args:
+                    UID: ${UID:-1000}
+                    GID: ${GID:-1000}
+
         container_name: book_app
         restart: unless-stopped
         working_dir: /var/www

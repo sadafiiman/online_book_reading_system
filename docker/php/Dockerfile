@@ -18,14 +18,16 @@ RUN apt-get update && apt-get install -y \
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
+# Align www-data uid/gid with the host user to avoid bind-mount permission issues
+ARG UID=1000
+ARG GID=1000
+RUN groupmod -o -g ${GID} www-data && usermod -o -u ${UID} -g www-data www-data
+
 WORKDIR /var/www
 
 COPY . .
 
 RUN composer install
-
-RUN chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache \
-    && chmod -R 775 /var/www/storage /var/www/bootstrap/cache
 
 COPY docker/php/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
