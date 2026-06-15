@@ -91,8 +91,8 @@ class BookSeeder extends Seeder
 
             $content = $this->generateContent($bookData['title'], $bookData['intro'], $paragraphs, $bookData['target_chars']);
 
-            $contentPath = 'books/book-' . str_replace([' ', '.'], ['-', ''], strtolower($bookData['isbn'])) . '.txt';
-            Storage::put($contentPath, $content);
+            $contentPath = 'book-' . str_replace([' ', '.'], ['-', ''], strtolower($bookData['isbn'])) . '.txt';
+            Storage::disk('book')->put($contentPath, $content);
 
             $book = Book::updateOrCreate(
                 ['isbn' => $bookData['isbn']],
