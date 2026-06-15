@@ -1,6 +1,28 @@
 # Online Book Reading System
 
-A Laravel 12 REST API for managing a personal book reading experience with font-size-aware page tracking and race condition safety.
+A Laravel 12 REST API for managing a personal book reading experience with font-size-aware page tracking, race condition safety, structured activity logging, and book content delivery.
+
+---
+
+## Table of Contents
+
+- [Quick Start (Docker)](#quick-start-docker)
+- [Architecture & Design Decisions](#architecture--design-decisions)
+    - [Layer Structure](#layer-structure)
+    - [DTOs & Resources](#dtos--resources)
+    - [Font-Size-Agnostic Page Tracking](#font-size-agnostic-page-tracking)
+    - [Page Content Delivery](#page-content-delivery)
+    - [Race Condition Safety](#race-condition-safety)
+    - [Caching](#caching)
+    - [Activity Logging & Observability](#activity-logging--observability)
+- [API Reference](#api-reference)
+    - [1. Add Book to Library](#1-add-book-to-library)
+    - [2. Open a Book](#2-open-a-book)
+    - [3. Turn Page](#3-turn-page)
+- [Seeded Books (IDs 1–5)](#seeded-books-ids-15)
+- [Running Tests](#running-tests)
+- [Postman Collection](#postman-collection)
+- [Project Structure](#project-structure)
 
 ---
 
@@ -28,8 +50,10 @@ That's it. The entrypoint automatically:
 
 ```
 HTTP Layer      →  Controllers, FormRequests, Resources, Middleware
-Service Layer   →  BookService (business logic, cache)
+Service Layer   →  BookService (business logic, cache, content retrieval)
 Repository      →  BookRepository / CachedBookRepository (DB + locking + cache-aside)
+                    BookContentRepository / CachedBookContentRepository (book text storage + cache)
+Logging         →  BookActivityLogger (structured activity & observability logging)
 Model Layer     →  Book, UserBook (domain logic)
 ```
 
@@ -40,11 +64,11 @@ All data flowing between layers is typed via **Data Transfer Objects (DTOs)**. H
 | DTO | Purpose |
 |-----|---------|
 | `AddBookData` | Carries validated input for adding a book to a library |
-| `BookProgressData` | Represents current reading position and page metadata |
+| `BookProgressData` | Represents current reading position, page metadata, and page text |
 | `LibraryEntryData` | Encapsulates a user's library entry (book + metadata) |
 | `OpenBookData` | Input for opening a book with optional font size |
 | `TurnPageData` | Input for turning a page with optional font size |
-| `TurnPageResultData` | Result of a page-turn operation |
+| `TurnPageResultData` | Result of a page-turn operation, including page text |
 
 | Resource | Shapes |
 |----------|--------|
@@ -73,6 +97,17 @@ current_page   = floor(char_position / chars_per_page) + 1
 
 This means changing font size never corrupts the user's reading position — the character offset remains stable, and the page number adjusts automatically.
 
+### Page Content Delivery
+
+Both **Open Book** and **Turn Page** responses include `page_text` — the raw text of the current page, sliced from the book's stored content based on the user's character position and font size:
+
+```
+page_start = floor(char_position / chars_per_page) × chars_per_page
+page_text  = substr(book_content, page_start, chars_per_page)
+```
+
+Book content is read via `BookContentRepository` from a dedicated `book` storage disk and cached for 24 hours by `CachedBookContentRepository` (content is static per book, so this is a long-lived cache with no invalidation concerns).
+
 ### Race Condition Safety
 
 `BookRepository::turnPage()` uses **MySQL pessimistic locking** (`SELECT ... FOR UPDATE`) inside a transaction:
@@ -95,7 +130,23 @@ This prevents the "lost update" problem: two simultaneous requests both reading 
 
 - **Book metadata** (title, author, total_chars) is cached for 24 hours — books don't change.
 - **User reading state** (`is_active`, `last_read_char_position`) is cached with a short 5-minute TTL for fast reads, but **writes always go through the database first** (with row locking via `turnPage`/`switchActiveBook`), and the cache is refreshed afterward from the committed result — the cache is never the source of truth for correctness-critical paths.
-- Cached values are stored as plain attribute arrays (`toArray()`) and rehydrated via `Model::hydrate()` on read, to avoid `__PHP_Incomplete_Class` serialization issues with Eloquent model instances across cache drivers.
+- Cached values are stored as plain attribute arrays (`toArray()`) and rehydrated via `setRawAttributes()` on read, to avoid `__PHP_Incomplete_Class` serialization issues and fillable/guard interference with Eloquent model instances across cache drivers.
+
+`CachedBookContentRepository` follows the same cache-aside pattern for raw book text, with a 24-hour TTL since content never changes after seeding.
+
+### Activity Logging & Observability
+
+`BookActivityLogger` (implementing `BookActivityLoggerInterface`) writes structured, dedicated-channel logs (`book_activity`) for:
+
+- **Cache hits/misses** — `cache.hit`, `cache.miss` (debug level)
+- **Cache refreshes** — `cache.refresh` after writes (info level)
+- **Domain events** — `book.added_to_library`, `book.opened`, `book.page_turned` (info level)
+- **Rejected actions** — `book.add_to_library_rejected`, `book.open_rejected`, etc., with a `reason` field (warning level)
+- **Lock contention** — `db.lock_contention`, logged when acquiring a row lock exceeds a 50ms threshold (warning level)
+
+This gives visibility into cache effectiveness, user behavior, and database contention without coupling business logic (`BookService`) or repositories to a concrete logging implementation — both depend on `BookActivityLoggerInterface`, injected via the service container.
+
+Logs are written to a dedicated `book_activity` channel — configure this in `config/logging.php`.
 
 ---
 
@@ -151,7 +202,8 @@ Content-Type: application/json
     "title": "The Art of Clean Code",
     "last_page": 3,
     "total_pages": 60,
-    "font_size": 18
+    "font_size": 18,
+    "page_text": "Clean code is simple and direct. Clean code reads like well-written prose..."
   }
 }
 ```
@@ -180,7 +232,8 @@ Content-Type: application/json
     "current_page": 4,
     "total_pages": 60,
     "font_size": 18,
-    "is_last_page": false
+    "is_last_page": false,
+    "page_text": "Each function should do one thing. Functions should do one thing..."
   }
 }
 ```
@@ -221,6 +274,8 @@ docker compose exec app php artisan test --filter adding_a_book_twice_returns_40
 
 > **Note:** Avoid running `php artisan config:cache` / `route:cache` in local development — cached config silently overrides `phpunit.xml` environment variables and can cause tests to connect to the wrong database/cache.
 
+Feature tests for open/turn-page use `Storage::fake('book')` to provide in-memory book content without touching the real `book` disk.
+
 
 ## Postman Collection
 
@@ -237,8 +292,8 @@ A ready-to-use Postman collection is included in the project root: **`API.postma
 The requests are grouped to exercise the full reading flow in order:
 
 1. **Add Book to Library** — `POST /library/books` with a `book_id` from 1–5 (the seeded books).
-2. **Open Book** — `POST /library/books/{bookId}/open`, marks it active and returns the last read page.
-3. **Turn Page** — `POST /library/books/{bookId}/turn-page`, run repeatedly to advance through the book and confirm `current_page` increments correctly.
+2. **Open Book** — `POST /library/books/{bookId}/open`, marks it active and returns the last read page along with its text.
+3. **Turn Page** — `POST /library/books/{bookId}/turn-page`, run repeatedly to advance through the book and confirm `current_page` and `page_text` update correctly.
 
 Try opening a second book after step 2 — it deactivates the first, since only one book can be active per user at a time. Then try `turn-page` on the now-inactive book to see the `422` response.
 
@@ -273,16 +328,22 @@ app/
 ├── Http/
 │   └── Responses/
 │       └── ApiResponse.php               # Consistent JSON envelope
+├── Logging/
+│   ├── BookActivityLoggerInterface.php
+│   └── BookActivityLogger.php            # Structured book_activity channel logging
 ├── Models/
 │   ├── Book.php                          # totalPagesForFontSize()
-│   └── UserBook.php                      # currentPage(), advanceToNextPage()
+│   └── UserBook.php                      # currentPage(), charsPerPage(), advanceToNextPage()
 ├── Repositories/
 │   ├── Interfaces/
-│   │   └── BookRepositoryInterface.php
+│   │   ├── BookRepositoryInterface.php
+│   │   └── BookContentRepositoryInterface.php
 │   ├── BookRepository.php                # DB locking for race conditions
-│   └── CachedBookRepository.php          # Cache-aside decorator
+│   ├── CachedBookRepository.php          # Cache-aside decorator
+│   ├── BookContentRepository.php         # Reads book text from storage
+│   └── CachedBookContentRepository.php   # Cache-aside decorator for book content
 ├── Services/
-│   └── BookService.php                   # Business logic + cache orchestration
+│   └── BookService.php                   # Business logic, cache orchestration, page text extraction
 ├── Exceptions/
 │   └── BookExceptions/                   # Domain exceptions
 └── Providers/
