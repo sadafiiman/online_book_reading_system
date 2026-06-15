@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Repositories;
 
+use App\Logging\BookActivityLoggerInterface;
 use App\Models\Book;
 use App\Models\UserBook;
 use App\Repositories\BookRepository;
@@ -25,7 +26,7 @@ class CachedBookRepositoryTest extends TestCase
         Cache::store('array')->flush();
 
         $this->inner       = Mockery::mock(BookRepository::class);
-        $this->repository  = new CachedBookRepository($this->inner);
+        $this->repository = new CachedBookRepository($this->inner, Mockery::spy(BookActivityLoggerInterface::class));
     }
 
     protected function tearDown(): void

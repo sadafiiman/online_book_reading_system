@@ -9,6 +9,7 @@ use App\Exceptions\BookExceptions\BookAlreadyInLibraryException;
 use App\Exceptions\BookExceptions\BookNotActiveException;
 use App\Exceptions\BookExceptions\BookNotFoundException;
 use App\Exceptions\BookExceptions\LastPageReachedException;
+use App\Logging\BookActivityLoggerInterface;
 use App\Models\Book;
 use App\Models\UserBook;
 use App\Repositories\Interfaces\BookRepositoryInterface;
@@ -28,9 +29,8 @@ class BookServiceTest extends TestCase
         parent::setUp();
 
         $this->repository = Mockery::mock(BookRepositoryInterface::class);
-        $this->service    = new BookService($this->repository);
+        $this->service    = new BookService($this->repository, Mockery::spy(BookActivityLoggerInterface::class));
     }
-
     protected function tearDown(): void
     {
         Mockery::close();

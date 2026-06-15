@@ -12,6 +12,8 @@ use App\Repositories\BookRepository;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
+use App\Logging\BookActivityLoggerInterface;
+use Mockery;
 
 class BookRepositoryTest extends TestCase
 {
@@ -22,7 +24,7 @@ class BookRepositoryTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->repository = new BookRepository();
+        $this->repository = new BookRepository(Mockery::mock(BookActivityLoggerInterface::class));
     }
 
     #[Test]
