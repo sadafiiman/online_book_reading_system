@@ -91,7 +91,7 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\n    \"book_id\": 1\n}",
+					"raw": "{\n    \"font_size\": 16\n}",
 					"options": {
 						"raw": {
 							"language": "json"
