@@ -12,6 +12,7 @@ use App\Exceptions\BookExceptions\LastPageReachedException;
 use App\Logging\BookActivityLoggerInterface;
 use App\Models\Book;
 use App\Models\UserBook;
+use App\Repositories\Interfaces\BookContentRepositoryInterface;
 use App\Repositories\Interfaces\BookRepositoryInterface;
 use App\Services\BookService;
 use Mockery;
@@ -22,15 +23,22 @@ use Tests\TestCase;
 class BookServiceTest extends TestCase
 {
     private BookRepositoryInterface|MockInterface $repository;
+    private BookContentRepositoryInterface|MockInterface $contentRepository;
     private BookService $service;
 
     protected function setUp(): void
     {
         parent::setUp();
 
-        $this->repository = Mockery::mock(BookRepositoryInterface::class);
-        $this->service    = new BookService($this->repository, Mockery::spy(BookActivityLoggerInterface::class));
+        $this->repository        = Mockery::mock(BookRepositoryInterface::class);
+        $this->contentRepository = Mockery::mock(BookContentRepositoryInterface::class);
+        $this->service = new BookService(
+            $this->repository,
+            $this->contentRepository,
+            Mockery::spy(BookActivityLoggerInterface::class),
+        );
     }
+
     protected function tearDown(): void
     {
         Mockery::close();
@@ -95,12 +103,21 @@ class BookServiceTest extends TestCase
         $this->repository->shouldReceive('findUserBook')->with(10, 1)->once()->andReturn($existing);
         $this->repository->shouldReceive('switchActiveBook')->with(10, 1)->once()->andReturn($activated);
 
+        $this->contentRepository->shouldReceive('getContent')
+            ->with($book)
+            ->once()
+            ->andReturn(str_repeat('a', 20000));
+
         $result = $this->service->openBook(new OpenBookData(userId: 10, bookId: 1, fontSize: 16));
 
         $this->assertSame(1, $result->bookId);
         $this->assertSame(3, $result->lastPage);    // floor(4000/2000)+1
         $this->assertSame(10, $result->totalPages); // 20000/2000
         $this->assertSame(16, $result->fontSize);
+
+        // Page 3 covers chars [4000, 6000) -> floor(4000/2000)*2000 = 4000
+        $this->assertSame(2000, mb_strlen($result->pageText));
+        $this->assertSame(str_repeat('a', 2000), $result->pageText);
     }
 
     #[Test]
@@ -138,12 +155,21 @@ class BookServiceTest extends TestCase
 
         $this->repository->shouldReceive('turnPage')->with(10, 1, 16)->once()->andReturn($userBook);
 
+        $this->contentRepository->shouldReceive('getContent')
+            ->with($book)
+            ->once()
+            ->andReturn(str_repeat('b', 20000));
+
         $result = $this->service->turnPage(new TurnPageData(userId: 10, bookId: 1, fontSize: 16));
 
         $this->assertSame(1, $result->bookId);
         $this->assertSame(2, $result->currentPage);
         $this->assertSame(10, $result->totalPages);
         $this->assertFalse($result->isLastPage);
+
+        // Page 2 covers chars [2000, 4000)
+        $this->assertSame(2000, mb_strlen($result->pageText));
+        $this->assertSame(str_repeat('b', 2000), $result->pageText);
     }
 
     #[Test]

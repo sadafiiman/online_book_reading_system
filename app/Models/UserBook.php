@@ -73,8 +73,10 @@ class UserBook extends Model
         $this->font_size               = $fontSize;
     }
 
-    private function charsPerPage(int $fontSize): int
+    public function charsPerPage(?int $fontSize = null): int
     {
+        $fontSize = $fontSize ?? $this->font_size ?? config('books.default_font_size', 16);
+
         $baseCharsPerPage = (int) config('books.base_chars_per_page', 2000);
         $baseFontSize     = (int) config('books.default_font_size', 16);
 
